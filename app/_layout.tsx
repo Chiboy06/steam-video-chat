@@ -1,59 +1,81 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
-import 'react-native-reanimated';
+import 'react-native-gesture-handler';
+  
+import { Slot, Stack, useRouter, useSegments } from 'expo-router';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
+import { useEffect, useState } from 'react';
+import { StreamVideoClient, StreamVideo, User } from '@stream-io/video-react-native-sdk';
+import { OverlayProvider } from 'stream-chat-expo';
+import Toast from 'react-native-toast-message';
 
-import { useColorScheme } from '@/components/useColorScheme';
+const STREAM_KEY = process.env.EXPO_PUBLIC_STREAM_ACCESS_KEY;
 
-export {
-  // Catch any errors thrown by the Layout component.
-  ErrorBoundary,
-} from 'expo-router';
+const InitialLayout = () => {
+  const { authState, initialized } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+  const [client, setClient] = useState<StreamVideoClient | null>(null)
 
-export const unstable_settings = {
-  // Ensure that reloading on `/modal` keeps a back button present.
-  initialRouteName: '(tabs)',
-};
+  useEffect(() =>{
+    if (!initialized) return;
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
+    const inAuthGroup = segments[0] === '(hone)';
 
-export default function RootLayout() {
-  const [loaded, error] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-    ...FontAwesome.font,
-  });
-
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
-  useEffect(() => {
-    if (error) throw error;
-  }, [error]);
-
-  useEffect(() => {
-    if (loaded) {
-      SplashScreen.hideAsync();
+    if (authState?.authenticated && inAuthGroup) {
+      router.replace('/(home)');
+      console.log('authenticated and in auth group')
+    } else if (!authState?.authenticated) {
+      console.log('not authenticated');
+      
+      client?.disconnectUser();
+      router.replace('/');
     }
-  }, [loaded]);
 
-  if (!loaded) {
-    return null;
-  }
+  }, [authState, initialized]);
 
-  return <RootLayoutNav />;
-}
 
-function RootLayoutNav() {
-  const colorScheme = useColorScheme();
+  useEffect(() => {
+    if (authState?.authenticated && authState.token) {
+      console.log("creating a client");
+      const user: User = { id: authState.user_id! };
+      
+      try {
+        const client=  new StreamVideoClient({ apiKey: STREAM_KEY!, user, token: authState.token});
+        setClient(client)
+      } catch (e) {
+        console.log('error creating client', e);
+      }
+    }
+  }, []);
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <>
+    {!client && (
       <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="index" options={{ headerShown: false }} />
       </Stack>
-    </ThemeProvider>
-  );
+    )}
+    {client && (
+      <StreamVideo client={client}>
+        <OverlayProvider>
+          <Slot/>
+          <Toast/>
+        </OverlayProvider>
+      </StreamVideo>
+    )}
+    </>
+  )
 }
+
+const RootLayout = ()=> {
+  
+  return (
+    // <AuthProvider>
+      <GestureHandlerRootView style={{flex: 1}}>
+        <InitialLayout/>
+      </GestureHandlerRootView>
+    // </AuthProvider>
+  )
+}
+
+export default RootLayout;
